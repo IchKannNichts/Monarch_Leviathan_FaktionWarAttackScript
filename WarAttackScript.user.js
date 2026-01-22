@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         WarAttackScript.js
+// @name         Monarch_Leviathan_FaktionWarAttackScript
 // @version      1.20.1
 // @description  Deactivate the attack button when the score cap is reached (API-based)
 // @author       Kochaff3
