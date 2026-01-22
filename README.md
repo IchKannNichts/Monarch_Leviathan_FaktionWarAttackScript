@@ -26,49 +26,65 @@
 3. Save the script – it will automatically run on any page matching `https://www.torn.com/\*\`.  
 
 ## Configuration  
+```js
+/* ──────────────────────  KONFIGURATION  ────────────────────── */
+// URL that serves a JSON file like { "active": true, "scorecap": 12345 }
+const SCORECAP_URL = 'https://deinserver.de/scorecap.json';
 
-Edit the top section of the script (the **KONFIGURATION** block) to suit your faction:
-const SCORECAP_URL      = 'https://deinserver.de/scorecap.json'; // URL that returns {"active":true,"scorecap":}
-const CHECK_INTERVAL    = 5000;   // How often (ms) the main loop runs
-const SCORECAP_REFRESH  = 10000;  // How often (ms) the cap JSON is re‑fetched
-const TORN_API_KEY      = 'API-Key'; // ← INSERT YOUR OWN Torn API key here
-const TORN_FACTION_ID   = '40518';   // Your faction’s numeric ID
-SCORECAP_URL – Must point to a JSON file that contains at least the fields active (boolean) and scorecap (numeric).
-CHECK_INTERVAL – Determines how responsive the script is to score changes.
-SCORECAP_REFRESH – Controls how frequently the cap value is refreshed from the remote server.
-TORN_API_KEY – You must replace 'API-Key' with a valid Torn API key that has at least “Limited Access”. Without a proper key the API request will fail and the script will fall back to the DOM method only.
-TORN_FACTION_ID – The numeric ID of the faction whose score you want to monitor.
+// How often the main loop runs (milliseconds)
+// Smaller values → quicker reaction to a score change
+const CHECK_INTERVAL = 5_000;          // 5 seconds
+
+// How often the cap JSON is refreshed from the remote server
+const SCORECAP_REFRESH = 10_000;       // 10 seconds
+
+// Your personal Torn API key (needs at least “Limited Access”)
+// Insert the key you generated in the Torn developer portal
+const TORN_API_KEY = 'YOUR_TORN_API_KEY_HERE';
+
+// Numeric ID of the faction you want to monitor
+// Find it in the faction’s URL: https://www.torn.com/factions.php?step=yourfaction&id=40518
+const TORN_FACTION_ID = 40518;
+```
+| Setting |	Purpose |	Typical adjustment|
+|---------|-------------|-------------|
+|SCORECAP_URL | Points to a JSON file that tells the script whether the cap is active and what the numeric limit (scorecap) is. | Host the file on your own server or a trusted CDN.
+|CHECK_INTERVAL | Interval for the main loop that checks the current faction score and toggles the attack button. | Lower if you need near‑real‑time disabling; higher to reduce CPU/network load.
+|SCORECAP_REFRESH | Interval for re‑fetching the cap JSON. | Keep it a few seconds longer than CHECK_INTERVAL so the latest cap is always known.
+|TORN_API_KEY | Authenticates the Torn API request. Without a valid key the script will fall back to reading the score from the page DOM. | Generate a new key in the Torn developer area and paste it here.
+|TORN_FACTION_ID | Identifies which faction’s score the script monitors. | Use the numeric ID from your faction’s URL (the part after id=).
 
 ## How It Works
 
-Profile ID Extraction – The script reads the hidden element #skip-to-content, extracts the numeric profile ID inside square brackets ([123456]), and stores it. This ID is used to locate the attack button (#button0-profile-).
-Fetching the Score Cap
-Every SCORECAP_REFRESH milliseconds the script sends a GM_xmlhttpRequest to SCORECAP_URL.
-The response is expected to be JSON with active (whether the cap is enforced) and scorecap (the numeric threshold).
-The values are stored in capActive and scoreCapValue.
-Obtaining the Current Faction Score
-Primary method – Torn API
-Calls https://api.torn.com/faction/<FACTION_ID>?selections=rankedwars,basic&key=<API_KEY>.
-Looks for the faction inside any active ranked war (ranked_wars). If found, returns that war’s score.
-If the faction isn’t in a ranked war, falls back to the basic field’s score.
-Secondary method – DOM fallback
-Selects the element span.right.scoreText___uVRQm.currentFaction___Omz6o (the on‑page score display).
-Parses the inner text, stripping commas, and converts it to an integer.
-Main Loop (mainLoop) – Runs every CHECK_INTERVAL milliseconds:
-Retrieves the profile ID (if missing, aborts).
-If capActive is false, ensures the attack button is enabled and exits.
-Otherwise, gets the current faction score via the API/Dom routine.
-If the score ≥ scoreCapValue, the script disables the attack button:
-Removes the active CSS class.
-Sets pointer-events: none and reduces opacity to indicate disabled state.
-Updates the button’s tooltip to show the cap that was reached.
-If the score is below the cap, the button is re‑enabled (restoring original styles).
-Timers – Two setInterval calls keep the script alive: one for refreshing the cap JSON, another for repeatedly executing mainLoop.
-Customising Button Appearance
-The script directly manipulates the button’s style attributes:
-opacity – 0.35 when disabled, 1 when enabled.
-pointerEvents – "none" when disabled, "auto" when enabled.
-Feel free to adjust these values or add additional visual cues (e.g., background colour) by editing the disableAttack and enableAttack functions.
+1. Profile ID Extraction
+  Read hidden #skip-to-content, pull the number inside […] (e.g., [123456]) and store it as profileId. This ID builds the selector for the attack button (#button0-profile-${profileId}).
+
+2. Score‑Cap Refresh
+  Every SCORECAP_REFRESH ms send a GM_xmlhttpRequest to SCORECAP_URL. Expect JSON { active: bool, scorecap: number }. Store as capActive and scoreCapValue.
+
+3. Current Faction Score
+  Primary: Call Torn API
+  https://api.torn.com/faction/<FACTION_ID>?selections=rankedwars,basic&key=<API_KEY>
+  • If the faction appears in an active ranked war, use that war’s score.
+  • Otherwise fall back to basic.score.
+  Secondary (DOM fallback): Read span.right.scoreText___uVRQm.currentFaction___Omz6o, strip commas, convert to integer.
+
+4. Main Loop (mainLoop) – runs every CHECK_INTERVAL ms
+  If profileId missing → abort.
+  If capActive is false → ensure the attack button stays enabled and exit.
+  Retrieve current faction score (API → DOM).
+  If score >= scoreCapValue → disable the button:
+  Remove active CSS class.
+  Set pointer-events: none and opacity: 0.35.
+  Update tooltip to show the reached cap.
+  Else → re‑enable the button: restore original styles and tooltip.
+  
+5. Timers
+  setInterval(refreshCap, SCORECAP_REFRESH) – updates the cap JSON.
+  setInterval(mainLoop, CHECK_INTERVAL) – continuously checks the score and toggles the button.
+
+6. Customising Appearance
+  Button styling is handled directly in disableAttack / enableAttack. Adjust opacity, pointer-events, or add extra cues (e.g., background colour) as desired.
 
 ## Debugging
 
