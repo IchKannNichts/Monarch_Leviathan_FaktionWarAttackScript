@@ -6,8 +6,9 @@
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      deinserver.de
-// @updateURL    https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/edit/main/WarAttackScript.js
-// @downloadURL  https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/edit/main/WarAttackScript.js
+// @updateURL    https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js
+// @downloadURL  https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js
+
 // ==/UserScript==
 
 (function () {
