@@ -1,4 +1,7 @@
 # Monarch_Leviathan_ WarAttackScript – README 
+### Todos
+- [ ] Rewrite the script to make an API call to get an array of factions that can no longer be attacked.
+- [ ] The attack button for people must then be disabled
 
 ## Overview  
 
