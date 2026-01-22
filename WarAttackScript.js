@@ -1,11 +1,13 @@
 // ==UserScript==
-// @name         Torn Discord Scorecap Blocker
-// @namespace    torn-discord-scorecap
-// @version      1.1
-// @description  Deaktiviert den Attack-Button sobald die Discord-Scorecap erreicht ist
+// @name         WarAttackScript.js
+// @version      1.0.0
+// @description  Deaktiviert den Attack-Button bei erreichter Scorecap
+// @author       DeinName
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      deinserver.de
+// @updateURL    https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/edit/main/WarAttackScript.js
+// @downloadURL  https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/edit/main/WarAttackScript.js
 // ==/UserScript==
 
 (function () {
