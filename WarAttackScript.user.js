@@ -2,7 +2,7 @@
 // @name         WarAttackScript.js
 // @version      1.0.0
 // @description  Deaktiviert den Attack-Button bei erreichter Scorecap
-// @author       DeinName
+// @author       Kochaff3
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      deinserver.de
