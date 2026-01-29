@@ -1,218 +1,216 @@
 // ==UserScript==
 // @name         Monarch_Leviathan_FaktionWarAttackScript
-// @version      1.20.1
-// @description  Deactivate the attack button when the score cap is reached (API-based)
+// @namespace    https://github.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript
+// @version      2.3.1
+// @description  Disables the attack button when the external API returns isAttackable = false. Shows a prompt for a Limited‑Access Torn API key on first run.
 // @author       Kochaff3
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
-// @connect      deinserver.de
+// @grant        GM_addStyle
+// @grant        GM_setClipboard
 // @connect      api.torn.com
-// @updateURL    https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js
-// @downloadURL  https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js
+// @connect      your-external-api.example.com   // <-- replace with the domain of your isAttackable API
+// @run-at       document-end
 // ==/UserScript==
 
-(function () {
+(() => {
     'use strict';
 
-    /* --------------------------------------------------------------
-       KONFIGURATION
-    -------------------------------------------------------------- */
-    const SCORECAP_URL      = 'https://deinserver.de/scorecap.json';
-    const CHECK_INTERVAL    = 5000;
-    const SCORECAP_REFRESH  = 10000;
-    const TORN_API_KEY      = 'API-Key'; //Limited Access
-    const TORN_FACTION_ID   = '40518';
+    /** --------------------------------------------------------------
+     *  CONSTANTS – change only here if needed
+     *  ----------------------------------------------------------- */
+    const CONFIG = Object.freeze({
+        // ---- Torn API -------------------------------------------------
+        TORN_FACTION_ID:   '40518',               // your faction ID
+        // ---- External "isAttackable" API -------------------------------
+        ATTACKABLE_URL:    'https://your-external-api.example.com/check', // <-- adjust!
+        // ---- Miscellaneous --------------------------------------------
+        REQUEST_TIMEOUT_MS: 8000,
+        LOCAL_STORAGE_KEY:  'warattack_torn_api_key', // key used in localStorage
+        CHECK_INTERVAL_MS: 3000,   // how often the API is queried (3 seconds)
+    });
 
-    /* --------------------------------------------------------------
-       STATUS
-    -------------------------------------------------------------- */
-    let cachedProfileId = null;
-    let capActive       = false;
-    let scoreCapValue   = 0;
+    /** --------------------------------------------------------------
+     *  LOGGING HELPERS
+     *  ----------------------------------------------------------- */
+    const log  = (...a) => console.log('[WarAttack]', ...a);
+    const warn = (...a) => console.warn('[WarAttack]', ...a);
+    const err  = (...a) => console.error('[WarAttack]', ...a);
 
-    console.log(' Script geladen');
+    /** --------------------------------------------------------------
+     *  INTERNAL STATE
+     *  ----------------------------------------------------------- */
+    const state = {
+        apiKey: null,                 // loaded from localStorage or the prompt
+        profileId: null,
+        attackBtn: null,
+    };
 
-    /* --------------------------------------------------------------
-       PROFIL‑ID AUSLESEN
-    -------------------------------------------------------------- */
-    function getProfileId() {
-        const el = document.getElementById('skip-to-content');
-        if (!el) {
-            console.log(' skip-to-content NICHT gefunden');
-            return null;
-        }
-        console.log(' skip-to-content Text:', el.innerText);
-
-        const match = el.innerText.match(/\[(\d+)\]/);
-        if (!match) {
-            console.log(' Keine ID in eckigen Klammern gefunden');
-            return null;
-        }
-        console.log(' Profil-ID erfolgreich ausgelesen:', match[1]);
-        return match[1];
-    }
-
-    /* --------------------------------------------------------------
-       BUTTON SUCHEN / AKTION
-    -------------------------------------------------------------- */
-    function findAttackButton(profileId) {
-        const btn = document.getElementById(`button0-profile-${profileId}`);
-        if (!btn) console.log(' Attack‑Button NICHT gefunden');
-        return btn;
-    }
-
-    function disableAttack(profileId) {
-        const btn = findAttackButton(profileId);
-        if (!btn) return;
-        btn.classList.remove('active');
-        btn.style.pointerEvents = 'none';
-        btn.style.opacity = '0.35';
-        btn.title = `Scorecap (${scoreCapValue}) erreicht`;
-        console.log(' Attack‑Button deaktiviert');
-    }
-
-    function enableAttack(profileId) {
-        const btn = findAttackButton(profileId);
-        if (!btn) return;
-        btn.classList.add('active');
-        btn.style.pointerEvents = 'auto';
-        btn.style.opacity = '1';
-        btn.title = '';
-        console.log(' Attack‑Button aktiviert');
-    }
-
-    /* --------------------------------------------------------------
-       SCORECAP VON DISCORD HOLEN
-    -------------------------------------------------------------- */
-    function fetchScorecap() {
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: SCORECAP_URL + '?t=' + Date.now(),
-            onload: function (response) {
-                try {
-                    const data = {
-                                   "active": true,
-                                   "scorecap": 1
-                                 };
-                    capActive = data.active === true;
-                    scoreCapValue = Number(data.scorecap || 0);
-                    console.log(' Discord‑Daten geladen:', data);
-                } catch (e) {
-                    console.log(' Fehler beim Parsen der Discord‑JSON');
-                }
-            },
-            onerror: function () {
-                console.log(' Fehler beim Laden der Scorecap‑URL');
-            }
-        });
-    }
-
-    /* --------------------------------------------------------------
-       FACTION SCORE AUS DER TORN‑API (mit Fallback)
-    -------------------------------------------------------------- */
-    async function getFactionScore() {
-        // -----------------------------------------------------------------
-        // 1️⃣ API‑Versuch (vollständige Fraktions‑Daten inkl. ranked_wars)
-        // -----------------------------------------------------------------
-        const endpoint = `https://api.torn.com/faction/${TORN_FACTION_ID}?selections=rankedwars,basic&key=${TORN_API_KEY}`;
-        //  → `rankedwars` muss als Auswahl‑Parameter angegeben werden, damit das Feld
-        //    `ranked_wars` im JSON enthalten ist.
+    /** --------------------------------------------------------------
+     *  UTILITY FUNCTIONS
+     *  ----------------------------------------------------------- */
+    // fetch with timeout (works in Tampermonkey/Greasemonkey)
+    const fetchWithTimeout = async (url, opts = {}) => {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), CONFIG.REQUEST_TIMEOUT_MS);
         try {
-            const resp = await fetch(endpoint);
-            if (!resp.ok) {
-                console.warn('[FACTION] API‑Antwort nicht OK:', resp.status);
-            } else {
-                const json = await resp.json();
+            const resp = await fetch(url, { ...opts, signal: ctrl.signal });
+            clearTimeout(timeout);
+            return resp;
+        } catch (e) {
+            clearTimeout(timeout);
+            throw e;
+        }
+    };
 
-                // -------------------------------------------------------------
-                // Hilfsfunktion: sucht in allen Ranked‑Wars nach deiner Fraktion
-                // -------------------------------------------------------------
-                const findMyFactionInfo = (data, factionId) => {
-                    const fid = String(factionId);
-                    const wars = data.ranked_wars || {};
+    // Add a CSS class for the disabled state (once)
+    GM_addStyle(`
+        .warattack-disabled {
+            opacity: 0.35 !important;
+            pointer-events: none !important;
+        }
+    `);
 
-                    for (const warKey of Object.keys(wars)) {
-                        const myFaction = wars[warKey].factions?.[fid];
-                        if (myFaction) {
-                            return {
-                                name : myFaction.name,
-                                score: Number(myFaction.score),
-                                chain: Number(myFaction.chain)
-                            };
-                        }
-                    }
-                    return null; // keine passende War gefunden
-                };
+    /** --------------------------------------------------------------
+     *  API‑KEY PROMPT
+     *  ----------------------------------------------------------- */
+    const showApiKeyPrompt = () => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position:fixed;top:0;left:0;width:100%;height:100%;
+            background:rgba(0,0,0,0.6);display:flex;align-items:center;
+            justify-content:center;z-index:99999;
+        `;
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background:#fff;padding:20px;border-radius:8px;
+            max-width:420px;width:90%;box-shadow:0 2px 12px rgba(0,0,0,.3);
+            font-family:Arial,sans-serif;
+        `;
+        modal.innerHTML = `
+            <h2 style="margin-top:0;">Enter your Torn API‑Key</h2>
+            <p>Please paste a <strong>Limited Access</strong> API key here (found under <em>Settings → API</em> in the game).</p>
+            <input id="warattack-key-inp" type="text" placeholder="API‑Key" style="width:100%;padding:8px;margin:10px 0;font-size:14px;">
+            <div style="text-align:right;">
+                <button id="warattack-save-btn" style="padding:6px 12px;">Save</button>
+            </div>
+        `;
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
 
-                const myInfo = findMyFactionInfo(json, TORN_FACTION_ID);
-                if (myInfo && !isNaN(myInfo.score)) {
-                    console.log('[FACTION] Score aus API (Ranked‑War):', myInfo.score);
-                    return myInfo.score;
-                }
+        const inp = modal.querySelector('#warattack-key-inp');
+        const btn = modal.querySelector('#warattack-save-btn');
 
-                // Falls die Fraktion nicht in einem Ranked‑War ist, kann das normale
-                // `basic`‑Feld `score` (Gesamt‑Fraktions‑Score) verwendet werden:
-                if (json.score !== undefined) {
-                    const apiScore = Number(json.score);
-                    if (!isNaN(apiScore)) {
-                        console.log('[FACTION] Score aus API (basic):', apiScore);
-                        return apiScore;
-                    }
-                }
+        btn.onclick = () => {
+            const val = inp.value.trim();
+            if (!val) {
+                alert('Please enter a valid API key.');
+                return;
             }
-        } catch (err) {
-            console.error('[FACTION] Fehler beim API‑Call:', err);
+            localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, val);
+            state.apiKey = val;
+            document.body.removeChild(overlay);
+            log('API key saved, starting script...');
+            initAfterKey(); // continue with the main workflow
+        };
+    };
+
+    /** --------------------------------------------------------------
+     *  CORE FUNCTIONS
+     *  ----------------------------------------------------------- */
+
+    // 1️⃣ Extract the profile ID from the hidden element
+    const getProfileId = () => {
+        const el = document.getElementById('skip-to-content');
+        if (!el) { warn('#skip-to-content not found'); return null; }
+        const m = el.innerText.match(/\[(\d+)]/);
+        return m ? m[1] : null;
+    };
+
+    // 2️⃣ Find the attack button for the current profile
+    const findAttackButton = (pid) => document.querySelector(`#button0-profile-${pid}`);
+
+    // 3️⃣ UI helpers
+    const enableAttack = (reason = '') => {
+        if (!state.attackBtn) return;
+        state.attackBtn.classList.remove('warattack-disabled', 'active');
+        state.attackBtn.title = reason;
+    };
+    const disableAttack = (reason = '') => {
+        if (!state.attackBtn) return;
+        state.attackBtn.classList.add('warattack-disabled');
+        state.attackBtn.classList.remove('active');
+        state.attackBtn.title = reason || 'Disabled';
+    };
+
+    // 4️⃣ Query the external isAttackable API
+    const fetchIsAttackable = async () => {
+        // Example URL: …/check?faction=40518&key=YOUR_KEY
+        const url = `${CONFIG.ATTACKABLE_URL}?faction=${CONFIG.TORN_FACTION_ID}&key=${state.apiKey}`;
+        try {
+            const resp = await fetchWithTimeout(url);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json(); // expected { isAttackable: bool, Reason?: string }
+            return {
+                allowed: Boolean(data.isAttackable),
+                reason:  data.Reason || '',
+            };
+        } catch (e) {
+            warn('Error while calling isAttackable API:', e);
+            // In doubt we allow the attack so the script does not block unnecessarily
+            return { allowed: true, reason: '' };
+        }
+    };
+
+    // 5️⃣ Main loop – runs regularly
+    const mainLoop = async () => {
+        // Ensure we have the profile ID and the button reference
+        if (!state.profileId) {
+            state.profileId = getProfileId();
+            if (!state.profileId) return; // nothing to do without a profile
+        }
+        if (!state.attackBtn) {
+            state.attackBtn = findAttackButton(state.profileId);
+            if (!state.attackBtn) {
+                warn('Attack button not found for profile', state.profileId);
+                return;
+            }
         }
 
-        // -----------------------------------------------------------------
-        // 2️⃣ DOM‑Fallback (wie bisher)
-        // -----------------------------------------------------------------
-        const span = document.querySelector('span.right.scoreText___uVRQm.currentFaction___Omz6o');
-        if (!span) {
-            console.log('[FACTION] Score‑Span nicht gefunden – kein Score verfügbar');
-            return null;
-        }
-        const txt = span.innerText.replace(/,/g, '').trim();
-        const value = parseInt(txt, 10);
-        if (isNaN(value)) {
-            console.log('[FACTION] Ungültiger Score‑Text im DOM:', span.innerText);
-            return null;
-        }
-        console.log('[FACTION] Score aus DOM:', value);
-        return value;
-    }
+        // Ask the external service whether attacking is allowed
+        const { allowed, reason } = await fetchIsAttackable();
 
-    /* --------------------------------------------------------------
-       HAUPTLOGIK
-    -------------------------------------------------------------- */
-    async function mainLoop() {
-        const profileId = getProfileId();
-        if (!profileId) return;
-        cachedProfileId = profileId;
-
-        if (!capActive) {
-            console.log(' Scorecap nicht aktiv');
-            enableAttack(profileId);
-            return;
-        }
-
-        const currentScore = await getFactionScore();
-        if (currentScore === null) return;
-
-        if (currentScore >= scoreCapValue) {
-            console.log(' SCORECAP ERREICHT');
-            disableAttack(profileId);
+        if (allowed) {
+            enableAttack(); // button active, clear any tooltip
         } else {
-            console.log(' Unter Scorecap');
-            enableAttack(profileId);
+            const tooltip = reason ? `Blocked externally: ${reason}` : 'Blocked externally';
+            disableAttack(tooltip);
         }
-    }
+    };
 
-    /* --------------------------------------------------------------
-       TIMER
-    -------------------------------------------------------------- */
-    setInterval(fetchScorecap, SCORECAP_REFRESH);
-    setInterval(() => {
-        mainLoop().catch(err => console.error(' Fehler im mainLoop:', err));
-    }, CHECK_INTERVAL);
+    /** --------------------------------------------------------------
+     *  INITIALISATION
+     *  ----------------------------------------------------------- */
+    const initAfterKey = async () => {
+        // Run the first check immediately, then continue on an interval
+        await mainLoop();
+        setInterval(mainLoop, CONFIG.CHECK_INTERVAL_MS);
+        log('WarAttackScript (isAttackable‑only) started.');
+    };
+
+    const start = () => {
+        const stored = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
+        if (stored) {
+            state.apiKey = stored;
+            log('Found API key in storage, starting immediately.');
+            initAfterKey();
+        } else {
+            log('No API key found – showing input dialog.');
+            showApiKeyPrompt();
+        }
+    };
+
+    // Entry point
+    start();
+
 })();
