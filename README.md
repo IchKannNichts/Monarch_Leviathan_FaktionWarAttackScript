@@ -21,7 +21,7 @@
 
 1. Install a userscript manager such as **Tampermonkey**, **Greasemonkey**, or **Violentmonkey**.  
 
-2. [Install](https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript_isAttackable_only.user.js  )
+2. [Install](https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js)
 
 3. Save the script – it will automatically run on any page matching `https://www.torn.com/\*\`.  
 
