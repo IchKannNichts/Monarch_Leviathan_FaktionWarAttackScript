@@ -1,7 +1,7 @@
 # Monarch_Leviathan_ WarAttackScript – README 
 ### Todos
-- [ ] Rewrite the script to make an API call to get an array of factions that can no longer be attacked.
-- [ ] The attack button for people must then be disabled
+- [X] Rewrite the script to make an API call to get an array of factions that can no longer be attacked. -> Only concerns the opposing war faction
+- [X] The attack button for people must then be disabled                                                 -> The attack button is active for all other players, but not for our War Franction players.   
 
 ## Overview  
 
@@ -99,4 +99,4 @@ Score‑Cap JSON Structure – The remote JSON must contain at least { "active":
 ## License & Attribution
 
 Author: Kochaff3
-Version: 1.20.1 (as of the script header)
+Version: 2.3.1
