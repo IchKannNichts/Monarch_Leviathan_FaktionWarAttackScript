@@ -1,11 +1,15 @@
 # Monarch_Leviathan_ WarAttackScript – README 
-### Todos
-- [X] Rewrite the script to make an API call to get an array of factions that can no longer be attacked. -> Only concerns the opposing war faction
-- [X] The attack button for people must then be disabled                                                 -> The attack button is active for all other players, but not for our War Franction players.   
 
+## Installation  
+
+1. Install a userscript manager such as **Tampermonkey**, **Greasemonkey**, or **Violentmonkey**.  
+
+2. [Install](https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js)
+
+3. Save the script – it will automatically run on any page matching `https://www.torn.com/\*\`.  
 ## Overview  
 
-`WarAttackScript.user.js` is a userscript designed for the browser‑based game **Torn**. It automatically disables the “Attack” button for a faction when a configurable **score cap** is reached. The script obtains the current cap from an external JSON endpoint (hosted on a Discord‑linked server) and checks the faction’s score via the Torn API (with a DOM fallback).  
+`WarAttackScript.user.js` is a userscript designed for the browser‑based game **Torn**. It automatically disables the “Attack” button for a faction when a configurable **score cap** is reached. The script obtains the current cap from an external JSON endpoint (hosted on a Discord‑linked server) and checks the faction’s score via the Torn API (with a DOM fallback). 
 
 ## Features  
 
@@ -16,14 +20,6 @@
 | **Dual score source** | Tries the Torn API first (`rankedwars` and `basic` selections). If the API fails or the faction isn’t in a ranked war, it falls back to reading the score from the page’s DOM. |
 | **Configurable intervals** | Separate timers control how often the cap is refreshed and how often the main logic runs. |
 | **Self‑logging** | Writes informative messages to the console for debugging. |
-
-## Installation  
-
-1. Install a userscript manager such as **Tampermonkey**, **Greasemonkey**, or **Violentmonkey**.  
-
-2. [Install](https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js)
-
-3. Save the script – it will automatically run on any page matching `https://www.torn.com/\*\`.  
 
 ## Configuration  
 ```js
