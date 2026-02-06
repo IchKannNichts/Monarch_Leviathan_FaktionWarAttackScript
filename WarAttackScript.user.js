@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Monarch_Leviathan_FaktionWarAttackScript
 // @namespace    https://github.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript
-// @version      2.3.1
-// @description  Disables the attack button when the external API returns isAttackable = false. Shows a prompt for a Limited‑Access Torn API key on first run.
+// @version      2.4.1
+// @description  Disables the attack button based on a list of non-attackable faction IDs from an external API.
 // @author       Kochaff3
-// @match        https://www.torn.com/*
+// @match        https://www.torn.com/profiles.php*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_setClipboard
@@ -17,208 +17,140 @@
     'use strict';
 
     /** --------------------------------------------------------------
-     *  CONSTANTS – change only here if needed
-     *  ----------------------------------------------------------- */
+     * CONFIGURATIONS
+     * ----------------------------------------------------------- */
     const CONFIG = Object.freeze({
-        // ---- Torn API -------------------------------------------------
-        TORN_FACTION_ID:   '40518',               // your faction ID
-        // ---- External "isAttackable" API -------------------------------
-        ATTACKABLE_URL:    'https://outside-avril-hobbyprojectme-914f8088.koyeb.app/api/factions/non-attackable', // <-- adjust!
-        // ---- Miscellaneous --------------------------------------------
+        TORN_FACTION_ID:    '40518',
+        ATTACKABLE_URL:     'https://outside-avril-hobbyprojectme-914f8088.koyeb.app/api/factions/non-attackable',
         REQUEST_TIMEOUT_MS: 8000,
-        LOCAL_STORAGE_KEY:  'warattack_torn_api_key', // key used in localStorage
-        CHECK_INTERVAL_MS: 10000,   // how often the API is queried (10 seconds)
+        LOCAL_STORAGE_KEY:  'warattack_torn_api_key',
+        CHECK_INTERVAL_MS:  10000, // Set to 10 seconds as requested
     });
 
-    /** --------------------------------------------------------------
-     *  LOGGING HELPERS
-     *  ----------------------------------------------------------- */
     const log  = (...a) => console.log('[WarAttack]', ...a);
     const warn = (...a) => console.warn('[WarAttack]', ...a);
-    const err  = (...a) => console.error('[WarAttack]', ...a);
 
-    /** --------------------------------------------------------------
-     *  INTERNAL STATE
-     *  ----------------------------------------------------------- */
     const state = {
-        apiKey: null,                 // loaded from localStorage or the prompt
-        profileId: null,
+        apiKey: null,
+        targetProfileId: null,
+        targetFactionId: null,
         attackBtn: null,
     };
 
     /** --------------------------------------------------------------
-     *  UTILITY FUNCTIONS
-     *  ----------------------------------------------------------- */
-    // fetch with timeout (works in Tampermonkey/Greasemonkey)
-    const fetchWithTimeout = (url, opts = {}) => {
+     * UTILITIES
+     * ----------------------------------------------------------- */
+
+    // Wrapper for GM_xmlhttpRequest to bypass CSP and handle timeouts
+    const fetchWithTimeout = (url) => {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
-                method: opts.method || "GET",
+                method: "GET",
                 url: url,
                 timeout: CONFIG.REQUEST_TIMEOUT_MS,
                 onload: (response) => {
-                    // Simuliert ein fetch-Response-Objekt
-                    resolve({
-                        ok: response.status >= 200 && response.status < 300,
-                        status: response.status,
-                        json: () => Promise.resolve(JSON.parse(response.responseText)),
-                        text: () => Promise.resolve(response.responseText)
-                    });
+                    try {
+                        resolve(JSON.parse(response.responseText));
+                    } catch(e) { reject(e); }
                 },
-                ontimeout: () => reject(new Error("Request timeout")),
+                ontimeout: () => reject(new Error("Request Timeout")),
                 onerror: (err) => reject(err)
             });
         });
     };
 
-    // Add a CSS class for the disabled state (once)
+    // Styling for the disabled button state
     GM_addStyle(`
         .warattack-disabled {
-            opacity: 0.35 !important;
+            opacity: 0.2 !important;
             pointer-events: none !important;
+            filter: grayscale(100%);
         }
     `);
 
     /** --------------------------------------------------------------
-     *  API‑KEY PROMPT
-     *  ----------------------------------------------------------- */
-    const showApiKeyPrompt = () => {
-        const overlay = document.createElement('div');
-        overlay.style.cssText = `
-            position:fixed;top:0;left:0;width:100%;height:100%;
-            background:rgba(0,0,0,0.6);display:flex;align-items:center;
-            justify-content:center;z-index:99999;
-        `;
-        const modal = document.createElement('div');
-        modal.style.cssText = `
-            background:#fff;padding:20px;border-radius:8px;
-            max-width:420px;width:90%;box-shadow:0 2px 12px rgba(0,0,0,.3);
-            font-family:Arial,sans-serif;
-        `;
-        modal.innerHTML = `
-            <h2 style="margin-top:0;">Enter your Torn API‑Key</h2>
-            <p>Please paste a <strong>Limited Access</strong> API key here (found under <em>Settings → API</em> in the game).</p>
-            <input id="warattack-key-inp" type="text" placeholder="API‑Key" style="width:100%;padding:8px;margin:10px 0;font-size:14px;">
-            <div style="text-align:right;">
-                <button id="warattack-save-btn" style="padding:6px 12px;">Save</button>
-            </div>
-        `;
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-        const inp = modal.querySelector('#warattack-key-inp');
-        const btn = modal.querySelector('#warattack-save-btn');
-
-        btn.onclick = () => {
-            const val = inp.value.trim();
-            if (!val) {
-                alert('Please enter a valid API key.');
-                return;
-            }
-            localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, val);
-            state.apiKey = val;
-            document.body.removeChild(overlay);
-            log('API key saved, starting script...');
-            initAfterKey(); // continue with the main workflow
-        };
-    };
-
-    /** --------------------------------------------------------------
-     *  CORE FUNCTIONS
-     *  ----------------------------------------------------------- */
-
-    // 1️ Extract the profile ID from the hidden element
-    const getProfileId = () => {
-        const el = document.getElementById('skip-to-content');
-        if (!el) { warn('#skip-to-content not found'); return null; }
-        const m = el.innerText.match(/\[(\d+)]/);
+     * HELPER FUNCTIONS
+     * ----------------------------------------------------------- */
+    // Extracts the Faction ID from the profile page links
+    const getTargetFactionId = () => {
+        const factionLink = document.querySelector('a[href*="factions.php?step=profile&ID="]');
+        if (!factionLink) return null;
+        const m = factionLink.href.match(/ID=(\d+)/);
         return m ? m[1] : null;
     };
 
-    // 2️ Find the attack button for the current profile
-    const findAttackButton = (pid) => document.querySelector(`#button0-profile-${pid}`);
-
-    // 3️ UI helpers
-    const enableAttack = (reason = '') => {
-        if (!state.attackBtn) return;
-        state.attackBtn.classList.remove('warattack-disabled', 'active');
-        state.attackBtn.title = reason;
-    };
-    const disableAttack = (reason = '') => {
-        if (!state.attackBtn) return;
-        state.attackBtn.classList.add('warattack-disabled');
-        state.attackBtn.classList.remove('active');
-        state.attackBtn.title = reason || 'Disabled';
+    // Extracts the Profile ID (XID) from the URL
+    const getProfileId = () => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('XID');
     };
 
-    // 4️ Query the external isAttackable API
-    const fetchIsAttackable = async () => {
-        // Example URL: …/check?faction=40518&key=YOUR_KEY
-        const url = `${CONFIG.ATTACKABLE_URL}?faction=${CONFIG.TORN_FACTION_ID}&key=${state.apiKey}`;
-        try {
-            const resp = await fetchWithTimeout(url);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const data = await resp.json(); // expected { isAttackable: bool, Reason?: string }
-            return {
-                allowed: Boolean(data.isAttackable),
-                reason:  data.Reason || '',
-            };
-        } catch (e) {
-            warn('Error while calling isAttackable API:', e);
-            // In doubt we allow the attack so the script does not block unnecessarily
-            return { allowed: true, reason: '' };
-        }
-    };
-
-    // 5️ Main loop – runs regularly
+    /** --------------------------------------------------------------
+     * MAIN LOGIC
+     * ----------------------------------------------------------- */
     const mainLoop = async () => {
-        // Ensure we have the profile ID and the button reference
-        if (!state.profileId) {
-            state.profileId = getProfileId();
-            if (!state.profileId) return; // nothing to do without a profile
+        state.targetProfileId = getProfileId();
+        if (!state.targetProfileId) return;
+
+        // Try to find the attack button and the target's faction
+        state.targetFactionId = getTargetFactionId();
+        state.attackBtn = document.querySelector(`#button0-profile-${state.targetProfileId}`);
+
+        if (!state.attackBtn) return;
+
+        // If the target has no faction, they cannot be on the blacklist
+        if (!state.targetFactionId) {
+            state.attackBtn.classList.remove('warattack-disabled');
+            state.attackBtn.title = "";
+            return;
         }
-        if (!state.attackBtn) {
-            state.attackBtn = findAttackButton(state.profileId);
-            if (!state.attackBtn) {
-                warn('Attack button not found for profile', state.profileId);
-                return;
+
+        try {
+            const url = `${CONFIG.ATTACKABLE_URL}?faction=${CONFIG.TORN_FACTION_ID}&key=${state.apiKey}`;
+            const data = await fetchWithTimeout(url);
+
+            // Check if the target's faction ID exists in the nonAttackableFactions array
+            if (data && data.nonAttackableFactions) {
+                const blacklistedFaction = data.nonAttackableFactions.find(
+                    f => String(f.FactionId) === String(state.targetFactionId)
+                );
+
+                if (blacklistedFaction) {
+                    // Disable button and show the reason in the tooltip
+                    state.attackBtn.classList.add('warattack-disabled');
+                    state.attackBtn.title = `BLOCKED: ${blacklistedFaction.Reason}`;
+                    log(`Attack blocked: ${blacklistedFaction.FactionName} (${blacklistedFaction.Reason})`);
+                } else {
+                    // Enable button if faction is not blacklisted
+                    state.attackBtn.classList.remove('warattack-disabled');
+                    state.attackBtn.title = "Target is attackable";
+                }
             }
-        }
-
-        // Ask the external service whether attacking is allowed
-        const { allowed, reason } = await fetchIsAttackable();
-
-        if (allowed) {
-            enableAttack(); // button active, clear any tooltip
-        } else {
-            const tooltip = reason ? `Blocked externally: ${reason}` : 'Blocked externally';
-            disableAttack(tooltip);
+        } catch (e) {
+            warn('API connection failed:', e);
+            // In case of error, we don't block the button to avoid getting stuck
+            state.attackBtn.classList.remove('warattack-disabled');
         }
     };
 
     /** --------------------------------------------------------------
-     *  INITIALISATION
-     *  ----------------------------------------------------------- */
-    const initAfterKey = async () => {
-        // Run the first check immediately, then continue on an interval
-        await mainLoop();
-        setInterval(mainLoop, CONFIG.CHECK_INTERVAL_MS);
-        log('WarAttackScript (isAttackable‑only) started.');
-    };
-
+     * ENTRY POINT
+     * ----------------------------------------------------------- */
     const start = () => {
         const stored = localStorage.getItem(CONFIG.LOCAL_STORAGE_KEY);
         if (stored) {
             state.apiKey = stored;
-            log('Found API key in storage, starting immediately.');
-            initAfterKey();
+            mainLoop();
+            setInterval(mainLoop, CONFIG.CHECK_INTERVAL_MS);
+            log('Script initialized. Interval: 10s');
         } else {
-            log('No API key found – showing input dialog.');
-            showApiKeyPrompt();
+            const key = prompt("Please enter your Torn Limited Access API Key:");
+            if (key) {
+                localStorage.setItem(CONFIG.LOCAL_STORAGE_KEY, key);
+                location.reload();
+            }
         }
     };
 
-    // Entry point
     start();
-
 })();
