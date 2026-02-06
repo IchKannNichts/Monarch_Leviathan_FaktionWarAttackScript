@@ -1,98 +1,76 @@
-# Monarch_Leviathan_ WarAttackScript – README 
+# Monarch_Leviathan_WarAttackScript – README
 
-## Installation  
+## Installation
 
-1. Install a userscript manager such as **Tampermonkey**, **Greasemonkey**, or **Violentmonkey**.  
+1. Install a userscript manager such as **Tampermonkey**, **Greasemonkey**, or **Violentmonkey**.
 
-2. [Install](https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js)
+2. [Install the Script](https://raw.githubusercontent.com/IchKannNichts/Monarch_Leviathan_FaktionWarAttackScript/main/WarAttackScript.user.js)
 
-3. Save the script – it will automatically run on any page matching `https://www.torn.com/\*\`.  
-## Overview  
+3. Save the script – it will automatically run on any page matching `https://www.torn.com/profiles.php*`.
 
-`WarAttackScript.user.js` is a userscript designed for the browser‑based game **Torn**. It automatically disables the “Attack” button for a faction when a configurable **score cap** is reached. The script obtains the current cap from an external JSON endpoint (hosted on a Discord‑linked server) and checks the faction’s score via the Torn API (with a DOM fallback). 
+## Overview
 
-## Features  
+`WarAttackScript.user.js` is an advanced utility for the browser‑based game **Torn**. It automatically manages the accessibility of the "Attack" button on player profiles. By communicating with an external API, it identifies if a target belongs to a blacklisted faction (e.g., Family Factions or factions that have reached a specific score cap).
+
+## Features
 
 | Feature | Description |
 |---------|-------------|
-| **Score‑cap enforcement** | Disables the attack button when the faction’s score meets or exceeds the configured cap. |
-| **Live cap updates** | Periodically fetches the latest cap value from `SCORECAP_URL`. |
-| **Dual score source** | Tries the Torn API first (`rankedwars` and `basic` selections). If the API fails or the faction isn’t in a ranked war, it falls back to reading the score from the page’s DOM. |
-| **Configurable intervals** | Separate timers control how often the cap is refreshed and how often the main logic runs. |
-| **Self‑logging** | Writes informative messages to the console for debugging. |
+| **Instant CSS Lock** | Hard-locks the attack button the moment it appears in the DOM to prevent accidental clicks during page load. |
+| **Blacklist Enforcement** | Automatically disables the button if the target's Faction ID matches an entry in the remote blacklist. |
+| **Smart Caching** | Stores the latest blacklist in `localStorage` for instant reaction on page reload (F5) before the API even responds. |
+| **Mutation Observation** | Uses a `MutationObserver` to detect the attack button immediately without waiting for the full page load. |
+| **Reason Tooltips** | Displays the specific reason for a block (e.g., "Family Faction") as a browser tooltip on hover. |
 
-## Configuration  
+## Configuration
+
+The script prompts for a **Limited Access API Key** on the first run. Internal configuration can be found at the top of the script:
+
 ```js
-/* ──────────────────────  KONFIGURATION  ────────────────────── */
-// URL that serves a JSON file like { "active": true, "scorecap": 12345 }
-const SCORECAP_URL = 'https://deinserver.de/scorecap.json';
+const CONFIG = {
+    // Numeric ID of your own faction
+    TORN_FACTION_ID: '40518',
 
-// How often the main loop runs (milliseconds)
-// Smaller values → quicker reaction to a score change
-const CHECK_INTERVAL = 5_000;          // 5 seconds
+    // Remote API endpoint providing the blacklist JSON
+    ATTACKABLE_URL: 'https://outside-avril-hobbyprojectme-914f8088.koyeb.app/api/factions/non-attackable',
 
-// How often the cap JSON is refreshed from the remote server
-const SCORECAP_REFRESH = 10_000;       // 10 seconds
-
-// Your personal Torn API key (needs at least “Limited Access”)
-// Insert the key you generated in the Torn developer portal
-const TORN_API_KEY = 'YOUR_TORN_API_KEY_HERE';
-
-// Numeric ID of the faction you want to monitor
-// Find it in the faction’s URL: https://www.torn.com/factions.php?step=yourfaction&id=40518
-const TORN_FACTION_ID = 40518;
+    // Interval for background updates (10 seconds)
+    CHECK_INTERVAL_MS: 10000,
+};
 ```
-| Setting |	Purpose |	Typical adjustment|
-|---------|-------------|-------------|
-|SCORECAP_URL | Points to a JSON file that tells the script whether the cap is active and what the numeric limit (scorecap) is. | Host the file on your own server or a trusted CDN.
-|CHECK_INTERVAL | Interval for the main loop that checks the current faction score and toggles the attack button. | Lower if you need near‑real‑time disabling; higher to reduce CPU/network load.
-|SCORECAP_REFRESH | Interval for re‑fetching the cap JSON. | Keep it a few seconds longer than CHECK_INTERVAL so the latest cap is always known.
-|TORN_API_KEY | Authenticates the Torn API request. Without a valid key the script will fall back to reading the score from the page DOM. | Generate a new key in the Torn developer area and paste it here.
-|TORN_FACTION_ID | Identifies which faction’s score the script monitors. | Use the numeric ID from your faction’s URL (the part after id=).
-
 ## How It Works
 
-1. Profile ID Extraction
-  Read hidden #skip-to-content, pull the number inside […] (e.g., [123456]) and store it as profileId. This ID builds the selector for the attack button (#button0-profile-${profileId}).
+1. **Security First (CSS Injection)**
+   At `document-start`, the script injects a global style that sets all attack buttons to `opacity: 0.15` and `pointer-events: none`. The button is only enabled if the script explicitly grants permission.
 
-2. Score‑Cap Refresh
-  Every SCORECAP_REFRESH ms send a GM_xmlhttpRequest to SCORECAP_URL. Expect JSON { active: bool, scorecap: number }. Store as capActive and scoreCapValue.
+2. **Data Fetching & Caching**
+   The script fetches a JSON array from the `ATTACKABLE_URL`. This data is cached locally.
+   **JSON Format:**
+   ```json
+   {
+     "nonAttackableFactions": [
+       { "FactionName": "Monarch HQ", "FactionId": 8336, "Reason": "Family Faction" },
+       { "FactionName":"Example","FactionId": "XXXX", "Reason": "War score reached" },
+       .... some more ....
+     ]
+   }
+   
+3. Target Identification
+   The script extracts the target's Profile ID from the URL and the Faction ID from the faction link on the profile page.
 
-3. Current Faction Score
-  Primary: Call Torn API
-  https://api.torn.com/faction/<FACTION_ID>?selections=rankedwars,basic&key=<API_KEY>
-  • If the faction appears in an active ranked war, use that war’s score.
-  • Otherwise fall back to basic.score.
-  Secondary (DOM fallback): Read span.right.scoreText___uVRQm.currentFaction___Omz6o, strip commas, convert to integer.
+4. Evaluation Loop
+   - Step A: Check local cache for the target's Faction ID. If found, the button remains locked.
+   - Step B: Perform a live background update to ensure the cache is fresh.
+   - Step C: If the faction is not on the blacklist, the .warattack-allowed class is added, making the button clickable and fully visible.
 
-4. Main Loop (mainLoop) – runs every CHECK_INTERVAL ms
-  If profileId missing → abort.
-  If capActive is false → ensure the attack button stays enabled and exit.
-  Retrieve current faction score (API → DOM).
-  If score >= scoreCapValue → disable the button:
-  Remove active CSS class.
-  Set pointer-events: none and opacity: 0.35.
-  Update tooltip to show the reached cap.
-  Else → re‑enable the button: restore original styles and tooltip.
-  
-5. Timers
-  setInterval(refreshCap, SCORECAP_REFRESH) – updates the cap JSON.
-  setInterval(mainLoop, CHECK_INTERVAL) – continuously checks the score and toggles the button.
+## Debugging & Maintenance
 
-6. Customising Appearance
-  Button styling is handled directly in disableAttack / enableAttack. Adjust opacity, pointer-events, or add extra cues (e.g., background colour) as desired.
-
-## Debugging
-
-All major actions emit console.log statements prefixed with tags such as [FACTION] or Scorecap. Open the browser’s developer console to trace execution, view fetched data, and spot errors (e.g., failed API calls or malformed JSON).
-
-## Important Notes
-
-API Key Required – Without inserting a valid Torn API key, the script cannot retrieve the score via the API and will rely solely on the DOM method, which may be less reliable during page changes.
-CORS & Permissions – The script declares @grant GM_xmlhttpRequest and @connect entries for the external JSON host and api.torn.com. Ensure your userscript manager permits cross‑origin requests.
-Score‑Cap JSON Structure – The remote JSON must contain at least { "active": true, "scorecap": 12345 }. Any additional fields are ignored.
+- Console Logs: Major events are logged with the [WarAttack] prefix in the browser console (F12).
+- Resetting the Key: If you need to update your API key, run the following command in the console:
+  localStorage.removeItem('warattack_torn_api_key'); location.reload();
+- Permissions: Ensure your script manager allows connections to koyeb.app and api.torn.com.
 
 ## License & Attribution
 
-Author: Kochaff3
-Version: 2.3.1
+Author: Kochaff3  
+Version: 2.5.1
