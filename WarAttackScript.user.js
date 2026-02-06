@@ -9,7 +9,7 @@
 // @grant        GM_addStyle
 // @grant        GM_setClipboard
 // @connect      api.torn.com
-// @connect      your-external-api.example.com   // <-- replace with the domain of your isAttackable API
+// @connect      koyeb.app
 // @run-at       document-end
 // ==/UserScript==
 
@@ -23,11 +23,11 @@
         // ---- Torn API -------------------------------------------------
         TORN_FACTION_ID:   '40518',               // your faction ID
         // ---- External "isAttackable" API -------------------------------
-        ATTACKABLE_URL:    'https://your-external-api.example.com/check', // <-- adjust!
+        ATTACKABLE_URL:    'https://outside-avril-hobbyprojectme-914f8088.koyeb.app/api/factions/non-attackable', // <-- adjust!
         // ---- Miscellaneous --------------------------------------------
         REQUEST_TIMEOUT_MS: 8000,
         LOCAL_STORAGE_KEY:  'warattack_torn_api_key', // key used in localStorage
-        CHECK_INTERVAL_MS: 3000,   // how often the API is queried (3 seconds)
+        CHECK_INTERVAL_MS: 10000,   // how often the API is queried (10 seconds)
     });
 
     /** --------------------------------------------------------------
@@ -50,17 +50,25 @@
      *  UTILITY FUNCTIONS
      *  ----------------------------------------------------------- */
     // fetch with timeout (works in Tampermonkey/Greasemonkey)
-    const fetchWithTimeout = async (url, opts = {}) => {
-        const ctrl = new AbortController();
-        const timeout = setTimeout(() => ctrl.abort(), CONFIG.REQUEST_TIMEOUT_MS);
-        try {
-            const resp = await fetch(url, { ...opts, signal: ctrl.signal });
-            clearTimeout(timeout);
-            return resp;
-        } catch (e) {
-            clearTimeout(timeout);
-            throw e;
-        }
+    const fetchWithTimeout = (url, opts = {}) => {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: opts.method || "GET",
+                url: url,
+                timeout: CONFIG.REQUEST_TIMEOUT_MS,
+                onload: (response) => {
+                    // Simuliert ein fetch-Response-Objekt
+                    resolve({
+                        ok: response.status >= 200 && response.status < 300,
+                        status: response.status,
+                        json: () => Promise.resolve(JSON.parse(response.responseText)),
+                        text: () => Promise.resolve(response.responseText)
+                    });
+                },
+                ontimeout: () => reject(new Error("Request timeout")),
+                onerror: (err) => reject(err)
+            });
+        });
     };
 
     // Add a CSS class for the disabled state (once)
@@ -119,7 +127,7 @@
      *  CORE FUNCTIONS
      *  ----------------------------------------------------------- */
 
-    // 1️⃣ Extract the profile ID from the hidden element
+    // 1️ Extract the profile ID from the hidden element
     const getProfileId = () => {
         const el = document.getElementById('skip-to-content');
         if (!el) { warn('#skip-to-content not found'); return null; }
@@ -127,10 +135,10 @@
         return m ? m[1] : null;
     };
 
-    // 2️⃣ Find the attack button for the current profile
+    // 2️ Find the attack button for the current profile
     const findAttackButton = (pid) => document.querySelector(`#button0-profile-${pid}`);
 
-    // 3️⃣ UI helpers
+    // 3️ UI helpers
     const enableAttack = (reason = '') => {
         if (!state.attackBtn) return;
         state.attackBtn.classList.remove('warattack-disabled', 'active');
@@ -143,7 +151,7 @@
         state.attackBtn.title = reason || 'Disabled';
     };
 
-    // 4️⃣ Query the external isAttackable API
+    // 4️ Query the external isAttackable API
     const fetchIsAttackable = async () => {
         // Example URL: …/check?faction=40518&key=YOUR_KEY
         const url = `${CONFIG.ATTACKABLE_URL}?faction=${CONFIG.TORN_FACTION_ID}&key=${state.apiKey}`;
@@ -162,7 +170,7 @@
         }
     };
 
-    // 5️⃣ Main loop – runs regularly
+    // 5️ Main loop – runs regularly
     const mainLoop = async () => {
         // Ensure we have the profile ID and the button reference
         if (!state.profileId) {
